@@ -8,7 +8,6 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Xml
@@ -16,8 +15,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.core.database.getStringOrNull
-import org.xmlpull.v1.XmlPullParser
 import androidx.core.graphics.createBitmap
+import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat
+import org.xmlpull.v1.XmlPullParser
 
 private const val TAG = "TUTILS: MainActivity"
 
@@ -53,16 +53,7 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
 
-        // Launch a picker starting in Downloads if possible
-        val mimeTypes = arrayOf("text/xml", "application/xml", "*/*")
-        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-            // Optional: hint the picker to open Downloads
-            putExtra(DocumentsContract.EXTRA_INITIAL_URI, MediaStore.Downloads.EXTERNAL_CONTENT_URI)
-        }
-        openXml.launch(arrayOf("*/*"))
+        openXml.launch(arrayOf("application/xml", "text/xml", "*/*"))
     }
 
     // --- Core logic ---
@@ -70,20 +61,24 @@ class MainActivity : ComponentActivity() {
     private fun loadVectorFromXml(uri: Uri): Drawable {
         Log.d(TAG, "loadVectorFromXml: uri=[$uri]")
 
-        // On API 24+, framework VectorDrawable supports createFromXml
-        val input = contentResolver.openInputStream(uri) ?: error("Cannot open input stream.")
-        input.use { stream ->
-            val parser: XmlPullParser = Xml.newPullParser().apply {
-                setInput(stream, null)
-            }
-            // Advance to START_TAG
+        contentResolver.openInputStream(uri).use { stream ->
+            requireNotNull(stream) { "Cannot open input stream." }
+
+            val parser: XmlPullParser = Xml.newPullParser().apply { setInput(stream, null) }
+
+            // Move to the first START_TAG and ensure it's <vector>
             var event = parser.eventType
             while (event != XmlPullParser.START_TAG && event != XmlPullParser.END_DOCUMENT) {
                 event = parser.next()
             }
-            if (event != XmlPullParser.START_TAG) error("Invalid XML.")
-            val dr = Drawable.createFromXml(resources, parser, theme)
-            return dr
+            if (event != XmlPullParser.START_TAG) error("Invalid XML: no start tag.")
+            val root = parser.name
+            require(root == "vector") { "Not a VectorDrawable: root=<$root>." }
+
+            // Use compat inflater (works consistently from raw streams, API 21+)
+            val attrs = Xml.asAttributeSet(parser)
+            return VectorDrawableCompat.createFromXmlInner(resources, parser, attrs, theme)
+                ?: error("Compat failed to inflate VectorDrawable.")
         }
     }
 
